@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Enable RDP & Firewall
         run: |
           # Enable Remote Desktop
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -21,19 +21,18 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
             -Name "SecurityLayer" -Value 0 -Force
 
-          # Firewall rule
+          # Open RDP port
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
-          Restart-Service -Name TermService -Force
+          Restart-Service TermService -Force
 
-      - name: Create RDP User (Fixed Password)
+      - name: Create RDP User
         run: |
           $username = "RDP"
-          $password = "RDP123!"
+          $password = "Rdp@1234"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-          # Remove user if exists
           if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
               Remove-LocalUser -Name $username
           }
@@ -75,12 +74,12 @@ jobs:
 
       - name: Keep Alive
         run: |
-          Write-Host "========================"
-          Write-Host "RDP READY"
+          Write-Host "=============================="
+          Write-Host "RDP READY ✅"
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "User: RDP"
-          Write-Host "Pass: RDP123!"
-          Write-Host "========================"
+          Write-Host "Pass: Rdp@1234"
+          Write-Host "=============================="
 
           while ($true) {
             Start-Sleep 300
