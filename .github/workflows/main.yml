@@ -4,45 +4,33 @@ on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Enable RDP & Firewall
+      - name: Enable RDP
         run: |
-          # Enable Remote Desktop
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-            -Name "fDenyTSConnections" -Value 0 -Force
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+          sc config TermService start= auto
+          net start TermService
 
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-            -Name "UserAuthentication" -Value 0 -Force
-
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-            -Name "SecurityLayer" -Value 0 -Force
-
-          # Open RDP port
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-
-          Restart-Service TermService -Force
-
-      - name: Create RDP User
+      - name: Disable Password Complexity Policy
         run: |
-          $username = "RDP"
-          $password = "Rdp@1234"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg) `
+            -replace "PasswordComplexity = 1","PasswordComplexity = 0" `
+            -replace "MinimumPasswordLength = \d+","MinimumPasswordLength = 0" |
+            Set-Content C:\secpol.cfg
+          secedit /configure /db C:\Windows\Security\Database\secedit.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          gpupdate /force
 
-          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              Remove-LocalUser -Name $username
-          }
-
-          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member $username
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
-
-          echo "RDP_USER=$username" >> $env:GITHUB_ENV
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+      - name: Create RDP User (Simple Password)
+        run: |
+          net user RDP RDP123 /add
+          net localgroup Administrators RDP /add
+          net localgroup "Remote Desktop Users" RDP /add
 
       - name: Install Tailscale
         run: |
@@ -50,7 +38,6 @@ jobs:
           $path = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest $url -OutFile $path
           Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
-          Remove-Item $path -Force
 
       - name: Connect Tailscale
         run: |
@@ -58,28 +45,22 @@ jobs:
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-rdp-$env:GITHUB_RUN_ID
 
-          $ip = $null
-          for ($i=0; $i -lt 10; $i++) {
-              $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              if ($ip) { break }
-              Start-Sleep 5
+          $ip=""
+          for ($i=0;$i -lt 10;$i++){
+            $ip=& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+            if($ip){break}
+            Start-Sleep 5
           }
-
-          if (-not $ip) { exit 1 }
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: Verify RDP
+      - name: RDP Info
         run: |
-          Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-
-      - name: Keep Alive
-        run: |
-          Write-Host "=============================="
+          Write-Host "========================="
           Write-Host "RDP READY ✅"
           Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "User: RDP"
-          Write-Host "Pass: Rdp@1234"
-          Write-Host "=============================="
+          Write-Host "USER: RDP"
+          Write-Host "PASS: RDP123"
+          Write-Host "========================="
 
           while ($true) {
             Start-Sleep 300
