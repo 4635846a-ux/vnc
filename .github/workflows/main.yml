@@ -37,13 +37,19 @@ jobs:
 
       - name: Create RDP User with Easy Password
         run: |
-          # كلمة مرور سهلة: 4 أرقام + 4 حروف صغيرة + @ واحدة
+          # تعطيل سياسة تعقيد كلمة المرور مؤقتاً
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
+          secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\secpol.cfg -Confirm:$false
+          
+          # كلمة مرور سهلة جداً
           $numbers = -join ((0..9) | Get-Random -Count 4)
           $letters = -join ((97..122) | ForEach-Object { [char]$_ } | Get-Random -Count 4)
-          $password = "${letters}@${numbers}"  # مثال: abcd@1234
+          $password = "${letters}${numbers}"  # مثال: abcd1234
           
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           
